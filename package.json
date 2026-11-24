@@ -1,0 +1,12 @@
+{
+  "name": "agent-credential-guard",
+  "version": "1.0.0",
+  "description": "Pre-tool-call hook that blocks Claude Code, Codex and Cursor from reading the macOS keychain and browser logins.",
+  "license": "MIT",
+  "private": true,
+  "bin": { "mac-yolo-credential-guard": "bin/mac-yolo-credential-guard" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node tests/test-mac-yolo-credential-guard.js && node tests/test-mac-yolo-credential-guard-rules.js && node tests/test-mac-yolo-credential-guard-ask.js && node tests/test-mac-yolo-falcon-export.js"
+  }
+}

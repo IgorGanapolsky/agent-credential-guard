@@ -1,0 +1,11 @@
+{
+  "session_id": "fixture",
+  "hook_event_name": "PreToolUse",
+  "cwd": "/tmp",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "security find-generic-password -s \"Chrome Safe Storage\" -w",
+    "description": "Read Chrome's encryption key"
+  }
+}

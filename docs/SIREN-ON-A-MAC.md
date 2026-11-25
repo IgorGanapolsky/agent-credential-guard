@@ -73,9 +73,9 @@ If the task needs something you were not given, stop and say so.
 
 These calls are allowed today. Each was checked against the hook in this repo:
 
-- Reading CLI credential files: `~/.ssh/id_*`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `~/.netrc`,
-  `~/.npmrc`, and `gh auth token`. This is Siren's boundary rule 4 (credentials only for the task's own
-  resources) and the largest gap. It is the next rule on the list.
+- ~~Reading CLI credential files~~ Closed Nov 25 2026 by the `cred-file` rule (a freeze exception Igor approved):
+  reading or copying `~/.ssh/id_*`, `~/.aws/credentials`, `~/.config/gh/hosts.yml` and `~/.netrc` is denied.
+  `~/.npmrc`, other tools' token files and `gh auth token` (which scripts use to pass a token on) are still open.
 - `Glob` or `Grep` over a whole browser profile folder (a single file such as `Login Data` is caught).
 - Uploads with `curl -d @file` are logged, not blocked, unless the mode is raised to `block`.
 - A program that reads the keychain from inside (a test suite, a compiled binary) is not visible to a hook. Use a

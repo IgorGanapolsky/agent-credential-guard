@@ -41,7 +41,8 @@ Each rule maps to a MITRE ATT&CK technique and can be set to `block`, `warn`, `l
 | Rule | Example it catches | ATT&CK |
 | --- | --- | --- |
 | `keychain` | `security find-generic-password`, `dump-keychain`, `export`, Python `keyring` | T1555.001 |
-| `browser-store` | Chrome, Brave, Edge, Arc, Safari and Firefox cookie and login files | T1555.003 |
+| `browser-store` | Chrome, Brave, Edge, Arc, Safari and Firefox cookie and login files, and Claude Desktop's own session (which now runs installed Claude apps) | T1555.003 |
+| `cred-file` | reading or copying SSH private keys, `~/.aws/credentials`, the GitHub CLI token file or `~/.netrc` (`ssh`, `git`, `aws` and `gh` still use them) | T1552.001 |
 | `cookie-library` | `browser_cookie3`, `pycookiecheat`, `rookiepy` | T1539 |
 | `quarantine` | `xattr -d com.apple.quarantine` | T1553.001 |
 | `launchctl-secret` | `launchctl setenv` with a secret-looking name | T1552 |

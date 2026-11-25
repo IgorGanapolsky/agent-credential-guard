@@ -99,6 +99,67 @@ const SECRET_NAME_RE = { test: (n) => SECRET_WORD_RE.test(n) && !NOT_SECRET.has(
 const INTERPRETER_RE = /(?:^|[\s;&|(/])(python[0-9.]*|node|perl|ruby|osascript|swift)(?=\s)/;
 const WRITE_OP_RE = /(?:>|(?:^|[\s;&|(/])(rm|mv|cp|tee|ln|chmod|chflags|truncate|ditto|rsync)\s|sed\s+-i)/;
 
+// Claude Desktop is an Electron app: its signed-in session lives in a Chromium profile under Application Support. Since
+// Nov 24 2026 that session also runs installed Claude apps, some with full access to the Mac. Only the session
+// stores are matched here, so claude_desktop_config.json (MCP servers) and logs stay readable.
+const CLAUDE_DESKTOP_ROOT = 'Library/Application Support/Claude';
+const CLAUDE_SESSION_RE = /Library\/Application Support\/Claude\/(?:Partitions\/[^/\s]+\/)?(?:Default\/)?(?:Cookies|Login Data|Local State|Web Data|Local Storage|Session Storage|IndexedDB)(?:-journal)?(?=$|[\s/;&|),\]}])/;
+const CLAUDE_SESSION_WORD_RE = /(?:^|[\s/])(?:Cookies|Login Data|Local State|Web Data|Local Storage|Session Storage|IndexedDB)(?:-journal)?(?=$|[\s/;&|),\]}])/;
+// The whole folder named as a source: `cp -r ~/Library/Application Support/Claude /tmp/x`, `tar czf x.tgz .../Claude/`.
+const CLAUDE_DIR_COPY_RE = /Library\/Application Support\/Claude\/?(?=$|[\s;&|)])/;
+const ARCHIVE_COPY_HEADS = new Set(['cp', 'mv', 'ln', 'ditto', 'rsync', 'tar', 'zip', 'scp', 'sqlite3']);
+
+function claudeSessionTouch(cmd, segs, cwd) {
+  if (CLAUDE_SESSION_RE.test(cmd)) return true;
+  if (segs.some((x) => !x.whole && ARCHIVE_COPY_HEADS.has(x.head) && CLAUDE_DIR_COPY_RE.test(x.text))) return true;
+  const inClaude = (cwd && (cwd.endsWith(`/${CLAUDE_DESKTOP_ROOT}`) || cwd.includes(`/${CLAUDE_DESKTOP_ROOT}/`)))
+    || segs.some((x) => x.head === 'cd' && x.text.includes(CLAUDE_DESKTOP_ROOT));
+  return Boolean(inClaude && segs.some((x) => !x.whole && x.head !== 'cd' && CLAUDE_SESSION_WORD_RE.test(x.text)));
+}
+
+// CLI credential files (ATT&CK T1552.001). Reading or copying one is denied; programs that use the credential
+// without printing it (ssh, ssh-add, git, aws, gh) and commands that only look at the file's metadata stay allowed.
+// Public keys, known_hosts, authorized_keys and ~/.ssh/config are not credentials.
+const CRED_SAFE_HEADS = new Set(['ssh', 'ssh-add', 'ssh-keygen', 'ssh-copy-id', 'ssh-agent', 'scp-public', 'git', 'aws', 'gh',
+  'chmod', 'chown', 'chflags', 'ls', 'stat', 'test', '[', 'mkdir', 'touch', 'cd', 'echo', 'printf', 'export', 'unset', 'file']);
+const CRED_PATTERN_HEADS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack']);
+const CRED_DIR_HEADS = new Set(['cp', 'mv', 'ditto', 'rsync', 'tar', 'zip', 'scp', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack']);
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const credFileRes = new Map();
+function credFileRe(home) {
+  if (!credFileRes.has(home)) {
+    const H = escRe(home);
+    const end = '(?=$|[\\s;&|),\\]}<>])';
+    const file = new RegExp(`${H}/(?:\\.ssh/(?!known_hosts|authorized_keys|config${end})(?![^\\s;&|)]*\\.pub${end})[^\\s;&|)<>]+`
+      + `|\\.aws/(?:credentials|sso/cache|cli/cache)(?:/[^\\s;&|)<>]*)?${end}`
+      + `|\\.config/gh/hosts\\.yml${end}|\\.netrc${end})`);
+    const dir = new RegExp(`${H}/(?:\\.ssh|\\.aws|\\.config/gh)/?${end}`);
+    credFileRes.set(home, { file, dir });
+  }
+  return credFileRes.get(home);
+}
+
+function credFileRead(segs, filePaths, toolName, home, cwd) {
+  const { file, dir } = credFileRe(home);
+  if (filePaths.some((p) => file.test(p) || (/^(Grep|search_file_content|grep_search)$/i.test(toolName) && dir.test(p)))) return true;
+  const inSsh = cwd && (cwd === `${home}/.ssh` || cwd.startsWith(`${home}/.ssh/`));
+  for (const x of segs) {
+    if (x.whole) continue;
+    if (CRED_SAFE_HEADS.has(x.head)) continue;
+    let words = [x.exe, ...x.args];
+    if (CRED_PATTERN_HEADS.has(x.head)) {
+      // The first plain argument of a search program is its pattern, not a file it reads.
+      const i = words.findIndex((w, k) => k > 0 && !w.startsWith('-'));
+      if (i > 0 && !x.args.some((a) => /^-(e|f|-regexp|-file)$/.test(a))) words = words.filter((_, k) => k !== i);
+    }
+    if (words.some((w) => file.test(w))) return true;
+    const findRuns = x.head === 'find' && x.args.some((a) => /^-(exec|execdir|ok|okdir)$/.test(a));
+    if ((CRED_DIR_HEADS.has(x.head) || findRuns) && words.slice(1).some((w) => dir.test(w) || file.test(w))) return true;
+    if (inSsh && x.args.some((w) => /^(?:\.\/)?id_[A-Za-z0-9_-]+$/.test(w))) return true;
+  }
+  return false;
+}
+
 function referencesBrowserRoot(s) {
   return BROWSER_ROOTS.some((root) => s.includes(root)) || s.includes('Library/Application Support/Firefox');
 }
@@ -138,6 +199,11 @@ const RULES = Object.fromEntries(Object.entries({
     technique: 'T1555.003', defaultMode: 'block',
     reason: 'reads or copies a browser cookie or password store',
     alternative: 'use a separate browser profile made for the agent (for example a headless Playwright profile), never your own',
+  },
+  'cred-file': {
+    technique: 'T1552.001', defaultMode: 'block',
+    reason: 'reads or copies a CLI credential file (an SSH private key, AWS credentials, the GitHub CLI token or ~/.netrc)',
+    alternative: 'let ssh, git, aws or gh use the credential themselves; if the task needs a token, pass that one value into the agent\'s environment from your own terminal',
   },
   'cookie-library': {
     technique: 'T1539', defaultMode: 'block',
@@ -215,7 +281,7 @@ const RULES = Object.fromEntries(Object.entries({
 
 const MODES = ['log', 'warn', 'ask', 'block'];
 // The rules that guard credentials. A mode below block on one of these is a high doctor finding.
-const CREDENTIAL_RULES = ['keychain', 'keychain-file', 'browser-store', 'cookie-library', 'quarantine', 'launchctl-secret', 'guard-config', 'work-folder', 'pipe-to-shell', 'tmp-exec', 'tcc', 'falcon'];
+const CREDENTIAL_RULES = ['keychain', 'keychain-file', 'browser-store', 'cred-file', 'cookie-library', 'quarantine', 'launchctl-secret', 'guard-config', 'work-folder', 'pipe-to-shell', 'tmp-exec', 'tcc', 'falcon'];
 const SETTINGS_FILE = 'credential-guard.json';
 const DEFAULT_UPLOAD_ALLOW = ['localhost', '127.0.0.1', '::1'];
 // screenpi.pe is screenpipe's installer domain.
@@ -1838,18 +1904,21 @@ function evaluate(payload, ctx, settings = loadSettings(ctx)) {
     if (cmd) {
       const nearBrowser = referencesBrowserRoot(cmd) || BROWSER_VENDOR_RE.test(cmd) || (cwd && (referencesBrowserRoot(cwd) || BROWSER_VENDOR_RE.test(`${cwd}/`)));
       if (nearBrowser && (CHROMIUM_STORE_RE.test(cmd) || COPY_TOOL_RE.test(cmd) || /\bfind\b.*-exec/.test(cmd))) return 'browser-store';
+      if (claudeSessionTouch(cmd, segs, cwd)) return 'browser-store';
       if (safariCookies(cmd, home) || /Cookies\.binarycookies/.test(cmd) || FIREFOX_RE.test(cmd)) return 'browser-store';
       const inKeychains = cwd && /\/Library\/Keychains(\/|$)/.test(cwd);
       if (KEYCHAIN_PATH_RE.test(cmd) || (inKeychains && /\.keychain(-db)?\b/.test(cmd)) || /(?:^|\s)Keychains\/\S*\.keychain/.test(cmd)) return 'keychain-file';
     }
     for (const p of filePaths) {
       if (referencesBrowserRoot(p) && CHROMIUM_STORE_RE.test(p)) return 'browser-store';
+      if (CLAUDE_SESSION_RE.test(p)) return 'browser-store';
       if (safariCookies(p, home) || FIREFOX_RE.test(p)) return 'browser-store';
       if (KEYCHAIN_PATH_RE.test(p)) return 'keychain-file';
     }
     return null;
   };
   add(storeRule());
+  if (credFileRead(segs, filePaths, toolName, home, cwd)) add('cred-file');
 
   if (guardConfigWrite(ctx, toolName, input, filePaths, segs.filter((x) => !x.whole), cmd, cwd, rawCmd)) add('guard-config');
 
@@ -2071,6 +2140,7 @@ const WHY = {
   keychain: 'tried to read saved passwords from the macOS Keychain',
   'keychain-file': 'tried to open a Keychain file, where the Mac keeps saved passwords',
   'browser-store': 'tried to read or copy browser cookies or saved passwords',
+  'cred-file': 'tried to read or copy an SSH key, AWS credentials, the GitHub CLI token or .netrc',
   'cookie-library': 'tried to load a library that decrypts browser cookies',
   quarantine: 'tried to remove the macOS safety flag on downloaded files (xattr)',
   'launchctl-secret': 'tried to put a secret where every program on this Mac can read it',

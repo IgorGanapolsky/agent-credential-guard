@@ -101,7 +101,7 @@ function req(id, fn) {
 try {
   req('REQ-01', () => {
     const expected = {
-      keychain: 'block', 'keychain-file': 'block', 'browser-store': 'block', 'cookie-library': 'block',
+      keychain: 'block', 'keychain-file': 'block', 'browser-store': 'block', 'cred-file': 'block', 'cookie-library': 'block',
       quarantine: 'block', 'launchctl-secret': 'block', 'guard-config': 'block', 'work-folder': 'block',
       'net-oneliner': 'block', 'curl-upload': 'log', recorder: 'block', 'banned-agent': 'block',
       'pipe-to-shell': 'block', 'tmp-exec': 'block', tcc: 'block', 'launch-agent': 'ask', falcon: 'block',
@@ -118,7 +118,8 @@ try {
     assert.strictEqual(G.RULES['curl-upload'].technique, 'T1048');
     assert.strictEqual(G.RULES.recorder.technique, 'T1113');
     assert.strictEqual(G.RULES['banned-agent'].technique, 'T1567');
-    assert.strictEqual(Object.keys(G.RULES).length, 17);
+    assert.strictEqual(G.RULES['cred-file'].technique, 'T1552.001');
+    assert.strictEqual(Object.keys(G.RULES).length, 18);
   });
 
   req('REQ-02', () => {

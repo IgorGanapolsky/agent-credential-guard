@@ -21,7 +21,8 @@ MITRE ATT&CK technique and a mode:
 |---|---|---|---|
 | `keychain` | T1555.001 | block | `security find-generic-password -s "Chrome Safe Storage"`, `security dump-keychain`, `security find-internet-password`, `security export`, Python `keyring` |
 | `keychain-file` | T1555.001 | block | opening a file in `~/Library/Keychains/` |
-| `browser-store` | T1555.003 | block | `Cookies`, `Login Data` or `Local State` under Chrome (also Beta and Canary), Brave, Edge, Arc, Chromium or Vivaldi; Safari `Cookies.binarycookies`; Firefox `cookies.sqlite`, `logins.json` or `key4.db`; copying a whole browser profile folder |
+| `browser-store` | T1555.003 | block | `Cookies`, `Login Data` or `Local State` under Chrome (also Beta and Canary), Brave, Edge, Arc, Chromium or Vivaldi; Safari `Cookies.binarycookies`; Firefox `cookies.sqlite`, `logins.json` or `key4.db`; copying a whole browser profile folder. Also Claude Desktop's own session under `~/Library/Application Support/Claude` (`Cookies`, `Local State`, `Local Storage`, `Session Storage`, `IndexedDB`, also under `Partitions/`, or the whole folder), since it now runs installed Claude apps; `claude_desktop_config.json` and logs stay readable |
+| `cred-file` | T1552.001 | block | reading or copying a CLI credential file: an SSH private key in `~/.ssh` (`cat`, `cp`, `base64`, `pbcopy <`, inline `python3 -c`, the Read or Edit tool, `grep -r` or `tar` of the whole folder), `~/.aws/credentials` and its `sso/cache` and `cli/cache`, `~/.config/gh/hosts.yml`, `~/.netrc`. Relative paths are resolved after a `cd` in the same command (`cd ~/.ssh && cat id_ed25519`). `ssh`, `git`, `aws` and `gh` may use a key passed with `-i` (or `ssh-keygen -f`, `IdentityFile=`), but a credential file given to them as plain input is denied (`git diff --no-index /dev/null ~/.netrc`, `gh gist create ...`), and so is one fed on stdin (`ssh host < ~/.ssh/id_rsa`). `ssh-add` stays allowed, so do `ls`, `chmod`, public keys, `known_hosts`, `authorized_keys`, `~/.ssh/config`, `~/.aws/config`, and a search or commit message that only names the path |
 | `cookie-library` | T1539 | block | `browser_cookie3`, `pycookiecheat`, `rookiepy` |
 | `quarantine` | T1553.001 | block | `xattr -d com.apple.quarantine`, `xattr -dr ...`, `xattr -c`, `xattr -cr` |
 | `launchctl-secret` | T1552 | block | `launchctl setenv` with a name containing KEY, TOKEN, SECRET, PASS, CRED, AUTH, PRIVATE, SESSION, COOKIE or PAT |
@@ -131,8 +132,10 @@ without `-i` of these files.
   time (`c=codex; $c`), gets past it.
 - `recorder` catches the common install and launch commands, not every way to run a downloaded binary.
 - Claude config dirs named only inside launcher scripts are found by `doctor` but are not protected by the hook.
-- Reading CLI credential files (`~/.ssh`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `~/.netrc`, `~/.npmrc`)
-  is not blocked yet, and neither is a `Glob` or `Grep` over a whole browser profile folder. See
+- `cred-file` does not cover `~/.npmrc`, other tools' token files, commands that print a token they hold
+  (`gh auth token`, `aws configure export-credentials`; scripts use these to pass a token on, so they stay allowed); a `cd` that the scan cannot read (`cd "$D"`)
+  hides the relative path that follows it. A `Glob` or `Grep` over a whole browser profile
+  folder is not blocked either. See
   [SIREN-ON-A-MAC.md](./SIREN-ON-A-MAC.md) for these gaps and the boundary rules to put in your agent's
   instructions.
 - The hook does not stop an agent from editing its config by means it can't see. Run `doctor` from time to time:

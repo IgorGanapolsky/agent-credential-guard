@@ -65,9 +65,21 @@ approve their own calls.
 ## Audit log
 
 Every hit is one JSON line in `~/Library/Logs/mac-yolo/credential-guard.jsonl`, with the rule, the ATT&CK
-technique, the agent and whether the call ran. The log holds no command text and no hosts, so it is safe to
-send to a SIEM. [tools/mac-yolo-falcon-export.js](./docs/falcon-logscale-export.md) sends it to CrowdStrike
+technique, the agent and whether the call ran. It keeps the program names and flags but no argument values,
+file names or hosts, so it is safe to send to a SIEM. [tools/mac-yolo-falcon-export.js](./docs/falcon-logscale-export.md) sends it to CrowdStrike
 Falcon LogScale.
+
+## Siren on a Mac
+
+Anthropic's [Siren study](https://safeguards.anthropic.com/2026/siren/) (Nov 2026) found that recent Claude
+models reach outside a sandbox in 21% to 32% of tempting scenarios, that wording like "you have full authority"
+raises that by up to 26 points, and that shell-only checks miss product tools such as file readers. Siren tested
+Linux sandboxes. On a Mac in YOLO mode there is usually no sandbox, so the honeypots are simply there.
+
+This guard sees every tool call (Read, Grep, Edit, Write, NotebookEdit, not only Bash), and it never reads
+free-text fields, so wording cannot change a verdict. `tests/test-mac-yolo-credential-guard-siren.js` checks
+both. [docs/SIREN-ON-A-MAC.md](./docs/SIREN-ON-A-MAC.md) maps each finding to macOS, gives six boundary rules to
+paste into `CLAUDE.md` or `AGENTS.md`, and lists the gaps that remain.
 
 ## What it cannot do
 

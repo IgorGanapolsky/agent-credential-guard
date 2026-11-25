@@ -93,6 +93,9 @@ Safehouse, Claude Code's `/sandbox`), not instead of one.
 npm test
 ```
 
+`tests/test-mac-yolo-credential-guard-installed.js` installs into a temporary home and runs the exact hook
+command the agent would run, so a guard that only works from this checkout fails the build.
+
 Tests run as a normal user. As root, the one check that a read-only folder blocks a write cannot fail, so it
 reports a false failure.
 

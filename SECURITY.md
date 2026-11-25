@@ -15,6 +15,9 @@ A command that gets past a rule it should have matched counts as a vulnerability
 - It doesn't see what a program does after it starts. A compiled binary or a script that reads the keychain by
   itself gets past it. Run agents in a sandbox (Docker Sandboxes, Agent Safehouse) as well, not instead.
 - It only guards agents that have the hook installed. `mac-yolo-credential-guard doctor` shows which ones do.
+- If the installed hook can't run (a missing Node.js, a crash on load), the agent treats that as a hook error and the
+  call goes ahead. `doctor` reports a hook whose Node.js is gone, and `tests/test-mac-yolo-credential-guard-installed.js`
+  checks that the installed copy runs on its own.
 - Settings in `~/.config/mac-yolo/credential-guard.json` can only be changed by a person. Agents are blocked from
   writing that folder, and an invalid file only makes the guard stricter.
 - The audit log holds no command text or argument values, so it can be shipped to a SIEM.

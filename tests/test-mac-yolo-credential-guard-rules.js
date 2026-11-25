@@ -856,10 +856,56 @@ try {
     write(logFile(home), `${lines.map((l) => JSON.stringify({ at: '2026-11-19T14:00:00Z', ...l })).join('\n')}\n`);
     assert.strictEqual(G.doctor(ctx).rules.find((x) => x.id === 'net-oneliner').hits.block, 2);
   });
+
+  // Per-agent overrides (the "device_overrides" idea from vllm-gr's benchmark gate): one agent can run stricter.
+  req('REQ-20', () => {
+    let { ctx, home } = makeCtx();
+    const payload = JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'security dump-keychain' } });
+    setSettings(home, { rules: { keychain: 'warn' }, agents: { codex: { rules: { keychain: 'block' } } } });
+    let s = G.loadSettings(ctx);
+    assert.deepStrictEqual(s.problems, []);
+    assert.deepStrictEqual(s.agentModes, { codex: { keychain: 'block' } });
+    assert.strictEqual(G.settingsFor(s, 'codex').modes.keychain, 'block');
+    assert.strictEqual(G.settingsFor(s, 'claude').modes.keychain, 'warn');
+    assert.ok(G.settingsFor(s, 'claude').downgraded.includes('keychain'));
+    assert.ok(!G.settingsFor(s, 'codex').downgraded.includes('keychain'));
+    // Codex is denied, Claude only warned, by the same file.
+    let r = runCli(['hook', '--agent', 'codex'], { home, input: payload });
+    assert.notStrictEqual(r.status, 0);
+    assert.match(r.stderr, /keychain/);
+    r = runCli(['hook', '--agent', 'claude'], { home, input: payload });
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.match(JSON.parse(r.stdout).systemMessage, /keychain/);
+    // The override is part of the policy digest, so a log line shows which policy decided.
+    const withOverride = G.policyDigest(s);
+    setSettings(home, { rules: { keychain: 'warn' } });
+    assert.notStrictEqual(G.policyDigest(G.loadSettings(ctx)), withOverride);
+    assert.deepStrictEqual(G.loadSettings(ctx).agentModes, {});
+
+    // An override looser than the shared mode is ignored and reported; the shared settings still apply.
+    ({ ctx, home } = makeCtx());
+    setSettings(home, { rules: { 'curl-upload': 'block' }, agents: { claude: { rules: { keychain: 'log' } } } });
+    s = G.loadSettings(ctx);
+    assert.ok(s.problems.some((p) => /looser/.test(p)));
+    assert.deepStrictEqual(s.agentModes, {});
+    assert.strictEqual(s.modes['curl-upload'], 'block');
+    r = runCli(['hook', '--agent', 'claude'], { home, input: payload });
+    assert.notStrictEqual(r.status, 0);
+    assert.ok(G.doctor(ctx).findings.some((f) => f.kind === 'guard-settings' && f.severity === 'high'));
+
+    // Unknown agents, unknown rules and bad shapes are reported and change nothing.
+    ({ ctx, home } = makeCtx());
+    setSettings(home, { agents: { gemini: { rules: { keychain: 'block' } }, codex: { rules: { nope: 'block' } }, cursor: ['x'] } });
+    s = G.loadSettings(ctx);
+    assert.strictEqual(s.problems.length, 3);
+    assert.deepStrictEqual(s.agentModes, {});
+    setSettings(home, { agents: 'codex' });
+    assert.ok(G.loadSettings(ctx).problems.some((p) => /"agents" is not an object/.test(p)));
+  });
 } finally {
   fs.rmSync(BASE, { recursive: true, force: true });
 }
 
 assert.deepStrictEqual(passed, ['REQ-01', 'REQ-02', 'REQ-03', 'REQ-04', 'REQ-05', 'REQ-06', 'REQ-07', 'REQ-08', 'REQ-09',
-  'REQ-11', 'REQ-12', 'REQ-13', 'REQ-14', 'REQ-15', 'REQ-16', 'REQ-17', 'REQ-18', 'REQ-19']);
+  'REQ-11', 'REQ-12', 'REQ-13', 'REQ-14', 'REQ-15', 'REQ-16', 'REQ-17', 'REQ-18', 'REQ-19', 'REQ-20']);
 console.log(`ok - ${passed.length} requirement groups passed`);

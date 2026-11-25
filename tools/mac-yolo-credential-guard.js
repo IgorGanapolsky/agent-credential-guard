@@ -235,7 +235,7 @@ const STRICTNESS = { log: 0, warn: 1, ask: 2, block: 3 };
 function loadSettings(ctx) {
   const modes = Object.fromEntries(Object.values(RULES).map((r) => [r.id, r.defaultMode]));
   const out = {
-    modes, allowlist: DEFAULT_UPLOAD_ALLOW, recorders: DEFAULT_RECORDERS, bannedAgents: [], problems: [], pinned: false, downgraded: [],
+    modes, allowlist: DEFAULT_UPLOAD_ALLOW, recorders: DEFAULT_RECORDERS, bannedAgents: [], problems: [], pinned: false, downgraded: [], agentModes: {},
   };
   let raw;
   try { raw = fs.readFileSync(path.join(configDir(ctx), SETTINGS_FILE), 'utf8'); } catch { return out; }
@@ -268,12 +268,44 @@ function loadSettings(ctx) {
     if (!invalid || STRICTNESS[m] > STRICTNESS[modes[id]]) modes[id] = m;
   }
   if (modes['guard-config'] !== 'block') { out.pinned = true; modes['guard-config'] = 'block'; }
+  out.agentModes = agentOverrides(cfg.agents, modes, problems);
   // ask is not a downgrade: the call still needs a person's approval each time.
   out.downgraded = CREDENTIAL_RULES.filter((id) => modes[id] !== 'block' && modes[id] !== 'ask');
   if (!invalid) out.allowlist = [...new Set([...DEFAULT_UPLOAD_ALLOW, ...lists.uploadAllowlist])];
   out.recorders = [...new Set([...DEFAULT_RECORDERS, ...lists.recorders])];
   out.bannedAgents = [...new Set(lists.bannedAgents)];
   return out;
+}
+
+/**
+ * Per-agent overrides: { "agents": { "codex": { "rules": { "launch-agent": "block" } } } }. An override can only make
+ * a rule stricter for that agent; a looser one is ignored and reported, so no agent can be given a weaker guard.
+ * Problems found here are reported but don't touch the shared settings above.
+ */
+function agentOverrides(agents, modes, problems) {
+  const out = {};
+  if (agents === undefined) return out;
+  if (!agents || typeof agents !== 'object' || Array.isArray(agents)) { problems.push('"agents" is not an object'); return out; }
+  for (const [agent, v] of Object.entries(agents)) {
+    if (!AGENTS.includes(agent)) { problems.push(`unknown agent "${agent}" in "agents" (use ${AGENTS.join(', ')})`); continue; }
+    const rules = v && typeof v === 'object' && !Array.isArray(v) ? v.rules : undefined;
+    if (!rules || typeof rules !== 'object' || Array.isArray(rules)) { problems.push(`"agents.${agent}.rules" is not an object`); continue; }
+    for (const [id, m] of Object.entries(rules)) {
+      if (!RULES[id]) problems.push(`unknown rule "${id}" in "agents.${agent}"`);
+      else if (!MODES.includes(m)) problems.push(`rule "${id}" in "agents.${agent}" has mode ${JSON.stringify(m)}, not log, warn, ask or block`);
+      else if (STRICTNESS[m] < STRICTNESS[modes[id]]) problems.push(`"agents.${agent}" sets "${id}" to ${m}, looser than ${modes[id]}; an agent override can only be stricter, so it is ignored`);
+      else if (STRICTNESS[m] > STRICTNESS[modes[id]]) (out[agent] = out[agent] || {})[id] = m;
+    }
+  }
+  return out;
+}
+
+/** The settings one agent runs under: the shared modes with that agent's stricter overrides applied. */
+function settingsFor(settings, agent) {
+  const extra = settings && settings.agentModes && settings.agentModes[agent];
+  if (!extra) return settings;
+  const modes = { ...settings.modes, ...extra };
+  return { ...settings, modes, downgraded: CREDENTIAL_RULES.filter((id) => modes[id] !== 'block' && modes[id] !== 'ask') };
 }
 
 const PATH_KEY_RE = /path|file|dir|target|source|dest|src|cwd|uri|url/i;
@@ -1897,6 +1929,8 @@ function policyDigest(settings) {
   const sorted = (l) => [...l].sort();
   return sha256(canonical({
     modes: settings.modes, uploadAllowlist: sorted(settings.allowlist), recorders: sorted(settings.recorders), bannedAgents: sorted(settings.bannedAgents),
+    // Added only when set, so a file without overrides keeps the digest it had before overrides existed.
+    ...(settings.agentModes && Object.keys(settings.agentModes).length ? { agentModes: settings.agentModes } : {}),
   })).slice(0, 12);
 }
 
@@ -2553,7 +2587,7 @@ function runHook(raw, agentFlag, ctx) {
   const agent = detectAgent(payload, agentFlag);
   let verdict;
   try {
-    verdict = evaluate(payload, ctx, settings || undefined);
+    verdict = evaluate(payload, ctx, settings ? settingsFor(settings, agent) : undefined);
   } catch {
     // A guard that crashes must not let the call through (exit 1 is a non-blocking error to the agents).
     verdict = { deny: true, rule: 'internal-error', technique: 'n/a', mode: 'block',
@@ -3681,6 +3715,6 @@ if (require.main === module) {
 
 module.exports = {
   defaultCtx, normalize, evaluate, runHook, install, uninstall, doctor, formatDoctor, fix, workFolders, main, actionSummary,
-  hookInstalled, listPending, approve, denyPending, promotionReport, formatPromotion, policyDigest, APPROVAL_TTL_MS, AGENTS, scanAutoApprove, readWorkFolders, LOG_FILE, HEARTBEAT_FILE, RULES, WHY, commandShape, logFields, summaryIsFixed, loggedTool, loggedParent, shellParse, loadSettings, hostIsOrSubdomain, parentChain, claudeDirs, autoApproveFlags,
+  hookInstalled, listPending, approve, denyPending, promotionReport, formatPromotion, policyDigest, settingsFor, APPROVAL_TTL_MS, AGENTS, scanAutoApprove, readWorkFolders, LOG_FILE, HEARTBEAT_FILE, RULES, WHY, commandShape, logFields, summaryIsFixed, loggedTool, loggedParent, shellParse, loadSettings, hostIsOrSubdomain, parentChain, claudeDirs, autoApproveFlags,
   guardTarget, guardedPaths, whereFields, cleanGuardFields, classifyAccess, guardAccess,
 };

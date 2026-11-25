@@ -59,7 +59,8 @@ read as a command.
   "rules": { "curl-upload": "warn", "net-oneliner": "block" },
   "uploadAllowlist": ["github.com", "uploads.example.org"],
   "recorders": ["rewind"],
-  "bannedAgents": ["codex", "gemini", "agy", "antigravity"]
+  "bannedAgents": ["codex", "gemini", "agy", "antigravity"],
+  "agents": { "codex": { "rules": { "curl-upload": "block", "launch-agent": "block" } } }
 }
 ```
 
@@ -68,6 +69,10 @@ read as a command.
   `localhost`, `127.0.0.1` and `::1` are always on it. An entry must be a full host name: `com` is rejected.
 - `recorders` adds names to the recorder list. `screenpipe` and `screenpi.pe` are always on it.
 - `bannedAgents` lists programs agents may not start. It is empty by default.
+- `agents` makes rules stricter for one agent (`claude`, `codex` or `cursor`), for example `block` for Codex
+  where Claude Code only gets `ask`. An override can only be stricter than the shared mode. A looser one is
+  ignored and the doctor reports it as high, so no agent can be given a weaker guard. Overrides are part of the
+  policy digest in each log line. A problem in `agents` never loosens the shared settings above.
 
 Names in `recorders` and `bannedAgents` must be at least three characters of letters, digits, `.`, `_` or `-`.
 

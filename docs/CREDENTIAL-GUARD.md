@@ -126,6 +126,10 @@ without `-i` of these files.
   time (`c=codex; $c`), gets past it.
 - `recorder` catches the common install and launch commands, not every way to run a downloaded binary.
 - Claude config dirs named only inside launcher scripts are found by `doctor` but are not protected by the hook.
+- Reading CLI credential files (`~/.ssh`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `~/.netrc`, `~/.npmrc`)
+  is not blocked yet, and neither is a `Glob` or `Grep` over a whole browser profile folder. See
+  [SIREN-ON-A-MAC.md](./SIREN-ON-A-MAC.md) for these gaps and the boundary rules to put in your agent's
+  instructions.
 - The hook does not stop an agent from editing its config by means it can't see. Run `doctor` from time to time:
   it reports any agent config dir whose hook is missing.
 
@@ -156,7 +160,8 @@ Every hit is logged to `~/Library/Logs/mac-yolo/credential-guard.jsonl`, one JSO
 - whether it denied the call;
 - the agent's parent process names, at most six (for example `["zsh", "claude", "Terminal"]`).
 
-The command text, code, file names and hosts are never logged. The log moves to `credential-guard.jsonl.1` once it
+The line also keeps the command's shape: the program names and flags (`curl -fsSL … (+1 more)`), never their
+values. Argument values, code, file names and hosts are never logged. The log moves to `credential-guard.jsonl.1` once it
 passes 5 MB.
 
 ## The doctor: what is already there

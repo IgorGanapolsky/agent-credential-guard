@@ -7,6 +7,6 @@
   "bin": { "mac-yolo-credential-guard": "bin/mac-yolo-credential-guard" },
   "engines": { "node": ">=20" },
   "scripts": {
-    "test": "node tests/test-mac-yolo-credential-guard.js && node tests/test-mac-yolo-credential-guard-rules.js && node tests/test-mac-yolo-credential-guard-ask.js && node tests/test-mac-yolo-falcon-export.js"
+    "test": "node tests/test-mac-yolo-credential-guard.js && node tests/test-mac-yolo-credential-guard-rules.js && node tests/test-mac-yolo-credential-guard-ask.js && node tests/test-mac-yolo-credential-guard-siren.js && node tests/test-mac-yolo-falcon-export.js"
   }
 }

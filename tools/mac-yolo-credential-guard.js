@@ -120,8 +120,12 @@ function claudeSessionTouch(cmd, segs, cwd) {
 // CLI credential files (ATT&CK T1552.001). Reading or copying one is denied; programs that use the credential
 // without printing it (ssh, ssh-add, git, aws, gh) and commands that only look at the file's metadata stay allowed.
 // Public keys, known_hosts, authorized_keys and ~/.ssh/config are not credentials.
-const CRED_SAFE_HEADS = new Set(['ssh', 'ssh-add', 'ssh-keygen', 'ssh-copy-id', 'ssh-agent', 'scp-public', 'git', 'aws', 'gh',
-  'chmod', 'chown', 'chflags', 'ls', 'stat', 'test', '[', 'mkdir', 'touch', 'cd', 'echo', 'printf', 'export', 'unset', 'file']);
+// Programs that only look at a file's name or metadata, never its content.
+// ssh-add loads a key into the agent without printing it.
+const CRED_METADATA_HEADS = new Set(['ssh-add', 'chmod', 'chown', 'chflags', 'ls', 'stat', 'test', '[', 'mkdir', 'touch', 'echo', 'printf',
+  'export', 'unset', 'file']);
+// Programs that use a credential themselves. Only a key passed with -i (or in an ssh command string) is exempt.
+const CRED_USER_HEADS = new Set(['ssh', 'ssh-keygen', 'ssh-copy-id', 'git', 'aws', 'gh']);
 const CRED_PATTERN_HEADS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack']);
 const CRED_DIR_HEADS = new Set(['cp', 'mv', 'ditto', 'rsync', 'tar', 'zip', 'scp', 'grep', 'egrep', 'fgrep', 'rg', 'ag', 'ack']);
 const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -142,20 +146,40 @@ function credFileRe(home) {
 function credFileRead(segs, filePaths, toolName, home, cwd) {
   const { file, dir } = credFileRe(home);
   if (filePaths.some((p) => file.test(p) || (/^(Grep|search_file_content|grep_search)$/i.test(toolName) && dir.test(p)))) return true;
-  const inSsh = cwd && (cwd === `${home}/.ssh` || cwd.startsWith(`${home}/.ssh/`));
+  // Relative operands are resolved against the folder the command is in, following `cd` inside the command
+  // (`cd ~/.ssh && cat id_ed25519`, `cd ~ && cat .ssh/id_rsa`).
+  let here = cwd && cwd.startsWith('/') ? cwd : '';
+  const resolve = (w) => (w.startsWith('/') || !here || w.startsWith('-') || w.includes('=') ? w : path.resolve(here, w));
+  const credWord = (w) => file.test(w) || file.test(resolve(w));
   for (const x of segs) {
     if (x.whole) continue;
-    if (CRED_SAFE_HEADS.has(x.head)) continue;
-    let words = [x.exe, ...x.args];
+    if (x.head === 'cd') {
+      const target = x.args.find((w) => !w.startsWith('-'));
+      here = !target ? home : target.startsWith('/') ? target : here ? path.resolve(here, target) : '';
+      continue;
+    }
+    // A credential file fed on stdin goes to the program whatever it is: `ssh host < ~/.ssh/id_rsa`.
+    const words = [x.exe, ...x.args];
+    if (words.some((w, k) => (w === '<' && words[k + 1] && credWord(words[k + 1])) || (/^<[^<]/.test(w) && credWord(w.slice(1))))) return true;
+    if (CRED_METADATA_HEADS.has(x.head)) continue;
+    // ssh, git, aws and gh use a key named after -i (or inside an ssh command string) without printing it. Any other
+    // file operand is input: `git diff --no-index /dev/null ~/.netrc`, `gh gist create ~/.netrc`, `git add ~/.ssh/id_rsa`.
+    // A commit message, tag or PR body that only names the path is text (TEXT_ONLY).
+    if (CRED_USER_HEADS.has(x.head)) {
+      if (TEXT_ONLY(x)) continue;
+      const keyFlag = x.head === 'ssh-keygen' ? /^(-f)$/ : /^(-i|--identity|-o|-F)$/;
+      if (x.args.some((w, k) => credWord(w) && !keyFlag.test(x.args[k - 1] || '') && !/^IdentityFile=/.test(w))) return true;
+      continue;
+    }
+    let operands = words.slice(1);
     if (CRED_PATTERN_HEADS.has(x.head)) {
       // The first plain argument of a search program is its pattern, not a file it reads.
-      const i = words.findIndex((w, k) => k > 0 && !w.startsWith('-'));
-      if (i > 0 && !x.args.some((a) => /^-(e|f|-regexp|-file)$/.test(a))) words = words.filter((_, k) => k !== i);
+      const i = operands.findIndex((w) => !w.startsWith('-'));
+      if (i >= 0 && !x.args.some((a) => /^-(e|f|-regexp|-file)$/.test(a))) operands = operands.filter((_, k) => k !== i);
     }
-    if (words.some((w) => file.test(w))) return true;
+    if (file.test(x.exe) || operands.some(credWord)) return true;
     const findRuns = x.head === 'find' && x.args.some((a) => /^-(exec|execdir|ok|okdir)$/.test(a));
-    if ((CRED_DIR_HEADS.has(x.head) || findRuns) && words.slice(1).some((w) => dir.test(w) || file.test(w))) return true;
-    if (inSsh && x.args.some((w) => /^(?:\.\/)?id_[A-Za-z0-9_-]+$/.test(w))) return true;
+    if ((CRED_DIR_HEADS.has(x.head) || findRuns) && operands.some((w) => dir.test(w) || dir.test(resolve(w)))) return true;
   }
   return false;
 }

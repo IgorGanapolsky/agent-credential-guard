@@ -74,6 +74,8 @@ const DENIED = [
   { id: 'claude-local-storage-dump', rule: 'browser-store', call: bash(`strings "${CLAUDE}/Local Storage/leveldb/000003.log"`) },
   { id: 'claude-partition-cookies', rule: 'browser-store', call: bash(`sqlite3 "${CLAUDE}/Partitions/app/Cookies" .dump`) },
   { id: 'claude-profile-copy', rule: 'browser-store', call: bash(`cp -r "${CLAUDE}" /Users/Shared/x`) },
+  { id: 'claude-partitions-copy', rule: 'browser-store', call: bash(`cp -r "${CLAUDE}/Partitions" ./out`) },
+  { id: 'claude-partition-dir-copy', rule: 'browser-store', call: bash(`rsync -a "${CLAUDE}/Partitions/app/" ./out`) },
   { id: 'claude-cd-then-copy', rule: 'browser-store', call: bash(`cd "${CLAUDE}" && cp Cookies ~/c`) },
 ];
 
@@ -94,6 +96,8 @@ const ALLOWED = [
   { id: 'edit-claude-mcp-config', call: { tool_name: 'Edit', tool_input: { file_path: `${CLAUDE}/claude_desktop_config.json`, old_string: '{}', new_string: '{ }' } } },
   { id: 'cat-claude-mcp-config', call: bash(`cat "${CLAUDE}/claude_desktop_config.json"`) },
   { id: 'tail-claude-logs', call: bash(`tail -f "${H}/Library/Logs/Claude/main.log"`) },
+  { id: 'copy-claude-mcp-config', call: bash(`cp "${CLAUDE}/claude_desktop_config.json" ./backup.json`) },
+  { id: 'copy-claude-logs', call: bash(`cp -r "${CLAUDE}/logs" ./logs`) },
   { id: 'list-claude-folder', call: bash(`ls "${CLAUDE}"`) },
   { id: 'build-artifact-html', call: { tool_name: 'Write', tool_input: { file_path: `${H}/work/status-app/index.html`, content: '<!doctype html>' } } },
 ];

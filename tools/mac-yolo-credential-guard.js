@@ -106,7 +106,8 @@ const CLAUDE_DESKTOP_ROOT = 'Library/Application Support/Claude';
 const CLAUDE_SESSION_RE = /Library\/Application Support\/Claude\/(?:Partitions\/[^/\s]+\/)?(?:Default\/)?(?:Cookies|Login Data|Local State|Web Data|Local Storage|Session Storage|IndexedDB)(?:-journal)?(?=$|[\s/;&|),\]}])/;
 const CLAUDE_SESSION_WORD_RE = /(?:^|[\s/])(?:Cookies|Login Data|Local State|Web Data|Local Storage|Session Storage|IndexedDB)(?:-journal)?(?=$|[\s/;&|),\]}])/;
 // The whole folder named as a source: `cp -r ~/Library/Application Support/Claude /tmp/x`, `tar czf x.tgz .../Claude/`.
-const CLAUDE_DIR_COPY_RE = /Library\/Application Support\/Claude\/?(?=$|[\s;&|)])/;
+// Any folder or file under it, except the MCP config and logs: `cp -r .../Claude/Partitions ./out` copies session stores.
+const CLAUDE_DIR_COPY_RE = /Library\/Application Support\/Claude(?:\/(?!claude_desktop_config\.json(?=$|[\s;&|)])|logs?(?=$|[\s/;&|)]))[^\s;&|)]*)?\/?(?=$|[\s;&|)])/;
 const ARCHIVE_COPY_HEADS = new Set(['cp', 'mv', 'ln', 'ditto', 'rsync', 'tar', 'zip', 'scp', 'sqlite3']);
 
 function claudeSessionTouch(cmd, segs, cwd) {
@@ -175,7 +176,10 @@ function credFileRead(segs, filePaths, toolName, home, cwd) {
     if (CRED_PATTERN_HEADS.has(x.head)) {
       // The first plain argument of a search program is its pattern, not a file it reads.
       const i = operands.findIndex((w) => !w.startsWith('-'));
-      if (i >= 0 && !x.args.some((a) => /^-(e|f|-regexp|-file)$/.test(a))) operands = operands.filter((_, k) => k !== i);
+      // Not when the pattern comes from -e/-f (also attached, `-eKEY`, `-ie`, `--regexp=KEY`): then every plain
+      // argument is a file.
+      const patternByFlag = x.args.some((a) => /^-[A-Za-z]*[ef]/.test(a) || /^--(regexp|file)(=|$)/.test(a));
+      if (i >= 0 && !patternByFlag) operands = operands.filter((_, k) => k !== i);
     }
     if (file.test(x.exe) || operands.some(credWord)) return true;
     const findRuns = x.head === 'find' && x.args.some((a) => /^-(exec|execdir|ok|okdir)$/.test(a));
